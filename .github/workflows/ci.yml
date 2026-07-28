@@ -1,0 +1,27 @@
+name: ci
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  test:
+    runs-on: [self-hosted, Linux, X64, hestia]
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@5064d95ba18d4a9dda7c4cc67adeb03aea1a2a14
+        with:
+          go-version: '1.21'
+      - name: Vet
+        run: go -C ./graph/outlook-mcp-go vet ./...
+      - name: Test (with race detector)
+        run: go -C ./graph/outlook-mcp-go test -race -v ./...
