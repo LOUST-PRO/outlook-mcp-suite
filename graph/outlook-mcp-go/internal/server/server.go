@@ -3,7 +3,8 @@
 // Fase 1 Stage 1: list_messages.
 // Fase 1 Stage 2: get_message + search_messages.
 // Fase 1 Stage 3: list_folders + get_folder + list_categories.
-// Remaining tools land in Stages 4-6 per the plan in ARCHITECTURE.md.
+// Fase 1 Stage 4: list_attachments + get_attachment + list_rules.
+// Remaining tools land in Stages 5-6 per the plan in ARCHITECTURE.md.
 
 package server
 
@@ -31,7 +32,7 @@ func defaultHTTPClient() *http.Client {
 func New(manager *auth.Manager) *server.MCPServer {
 	s := server.NewMCPServer(
 		"outlook-mcp-suite/graph",
-		"0.1.0-stage3",
+		"0.1.0-stage4",
 		server.WithToolCapabilities(true),
 		server.WithLogging(),
 	)
@@ -199,6 +200,81 @@ func New(manager *auth.Manager) *server.MCPServer {
 		}),
 	)
 	s.AddTool(listCategories, tools.HandleListCategories(manager, graph))
+
+	// Tool: list_attachments (Stage 4)
+	listAttachments := mcp.NewTool("list_attachments",
+		mcp.WithDescription("List attachments on a message. Returns metadata only (name, contentType, size, isInline) — does NOT include the binary content. Use get_attachment with max_bytes to fetch the actual bytes."),
+		mcp.WithString("account",
+			mcp.Description("Account name from [accounts].allowed."),
+			mcp.Required(),
+		),
+		mcp.WithString("message_id",
+			mcp.Description("Graph message ID."),
+			mcp.Required(),
+		),
+		mcp.WithNumber("top",
+			mcp.Description("Maximum attachments to return (1-1000). Default: 25."),
+			mcp.Min(1), mcp.Max(1000),
+		),
+		mcp.WithToolAnnotation(mcp.ToolAnnotation{
+			Title:           "List Outlook message attachments",
+			ReadOnlyHint:    new(true),
+			DestructiveHint: new(false),
+			IdempotentHint:  new(true),
+			OpenWorldHint:   new(false),
+		}),
+	)
+	s.AddTool(listAttachments, tools.HandleListAttachments(manager, graph))
+
+	// Tool: get_attachment (Stage 4)
+	getAttachment := mcp.NewTool("get_attachment",
+		mcp.WithDescription("Fetch a single attachment by ID. The binary content is returned base64-encoded in the contentBytes field. Always pass max_bytes to cap the response size; recommended cap is 10 MiB."),
+		mcp.WithString("account",
+			mcp.Description("Account name from [accounts].allowed."),
+			mcp.Required(),
+		),
+		mcp.WithString("message_id",
+			mcp.Description("Graph message ID containing the attachment."),
+			mcp.Required(),
+		),
+		mcp.WithString("attachment_id",
+			mcp.Description("Graph attachment ID (returned by list_attachments)."),
+			mcp.Required(),
+		),
+		mcp.WithNumber("max_bytes",
+			mcp.Description("Cap on attachment size in bytes (decoded). Recommended: 10485760 (10 MiB). Hard limit: 26214400 (25 MiB). Default: 10 MiB. Returns an error before downloading if the attachment exceeds this."),
+			mcp.Min(0),
+		),
+		mcp.WithToolAnnotation(mcp.ToolAnnotation{
+			Title:           "Get Outlook attachment content",
+			ReadOnlyHint:    new(true),
+			DestructiveHint: new(false),
+			IdempotentHint:  new(true),
+			OpenWorldHint:   new(false),
+		}),
+	)
+	s.AddTool(getAttachment, tools.HandleGetAttachment(manager, graph))
+
+	// Tool: list_rules (Stage 4)
+	listRules := mcp.NewTool("list_rules",
+		mcp.WithDescription("List inbox message rules. Each rule exposes its conditions, actions, and exceptions. The actions describe what the rule is configured to do (forward, move, mark) — this tool only reads the configuration; it does not execute any rule."),
+		mcp.WithString("account",
+			mcp.Description("Account name from [accounts].allowed."),
+			mcp.Required(),
+		),
+		mcp.WithNumber("top",
+			mcp.Description("Maximum rules to return (1-1000). Default: 100."),
+			mcp.Min(1), mcp.Max(1000),
+		),
+		mcp.WithToolAnnotation(mcp.ToolAnnotation{
+			Title:           "List Outlook inbox rules",
+			ReadOnlyHint:    new(true),
+			DestructiveHint: new(false),
+			IdempotentHint:  new(true),
+			OpenWorldHint:   new(false),
+		}),
+	)
+	s.AddTool(listRules, tools.HandleListRules(manager, graph))
 
 	return s
 }

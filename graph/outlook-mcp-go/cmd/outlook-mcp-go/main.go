@@ -66,7 +66,7 @@ func main() {
 			fmt.Fprint(os.Stderr, usage)
 			os.Exit(0)
 		case "-version", "--version", "version":
-			fmt.Fprintln(os.Stderr, "outlook-mcp-go 0.1.0-stage3")
+			fmt.Fprintln(os.Stderr, "outlook-mcp-go 0.1.0-stage4")
 			os.Exit(0)
 		case "serve":
 			os.Exit(runServe(os.Args[2:]))
