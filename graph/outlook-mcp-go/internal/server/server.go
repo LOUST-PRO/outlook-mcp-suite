@@ -1,10 +1,9 @@
 // server.go — MCP server bootstrap.
 //
-// Fase 1 Stage 1: list_messages (proof).
+// Fase 1 Stage 1: list_messages.
 // Fase 1 Stage 2: get_message + search_messages.
-// Remaining tools land in Stages 3-6 per the Fase 1 plan in
-// /ARCHITECTURE.md. Each registration is a single AddTool call
-// wrapping a typed handler in internal/tools/.
+// Fase 1 Stage 3: list_folders + get_folder + list_categories.
+// Remaining tools land in Stages 4-6 per the plan in ARCHITECTURE.md.
 
 package server
 
@@ -32,7 +31,7 @@ func defaultHTTPClient() *http.Client {
 func New(manager *auth.Manager) *server.MCPServer {
 	s := server.NewMCPServer(
 		"outlook-mcp-suite/graph",
-		"0.1.0-stage2",
+		"0.1.0-stage3",
 		server.WithToolCapabilities(true),
 		server.WithLogging(),
 	)
@@ -138,6 +137,68 @@ func New(manager *auth.Manager) *server.MCPServer {
 		}),
 	)
 	s.AddTool(searchMessages, tools.HandleSearchMessages(manager, graph))
+
+	// Tool: list_folders (Stage 3)
+	listFolders := mcp.NewTool("list_folders",
+		mcp.WithDescription("List mail folders in the mailbox. Top-level by default; pass parent=<id> to list children of a specific folder."),
+		mcp.WithString("account",
+			mcp.Description("Account name from [accounts].allowed."),
+			mcp.Required(),
+		),
+		mcp.WithString("parent",
+			mcp.Description("Optional parent folder ID. Empty = top-level /me/mailFolders."),
+		),
+		mcp.WithNumber("top",
+			mcp.Description("Maximum folders to return (1-1000). Default: 100."),
+			mcp.Min(1), mcp.Max(1000),
+		),
+		mcp.WithToolAnnotation(mcp.ToolAnnotation{
+			Title:           "List Outlook mail folders",
+			ReadOnlyHint:    new(true),
+			DestructiveHint: new(false),
+			IdempotentHint:  new(true),
+			OpenWorldHint:   new(false),
+		}),
+	)
+	s.AddTool(listFolders, tools.HandleListFolders(manager, graph))
+
+	// Tool: get_folder (Stage 3)
+	getFolder := mcp.NewTool("get_folder",
+		mcp.WithDescription("Fetch a single mail folder by ID. Returns counters (totalItemCount, unreadItemCount, childFolderCount)."),
+		mcp.WithString("account",
+			mcp.Description("Account name from [accounts].allowed."),
+			mcp.Required(),
+		),
+		mcp.WithString("folder_id",
+			mcp.Description("Graph folder ID (returned by list_folders)."),
+			mcp.Required(),
+		),
+		mcp.WithToolAnnotation(mcp.ToolAnnotation{
+			Title:           "Get Outlook mail folder",
+			ReadOnlyHint:    new(true),
+			DestructiveHint: new(false),
+			IdempotentHint:  new(true),
+			OpenWorldHint:   new(false),
+		}),
+	)
+	s.AddTool(getFolder, tools.HandleGetFolder(manager, graph))
+
+	// Tool: list_categories (Stage 3)
+	listCategories := mcp.NewTool("list_categories",
+		mcp.WithDescription("List all message categories defined by the user. Categories are referenced by ID from the categories[] field on each message."),
+		mcp.WithString("account",
+			mcp.Description("Account name from [accounts].allowed."),
+			mcp.Required(),
+		),
+		mcp.WithToolAnnotation(mcp.ToolAnnotation{
+			Title:           "List Outlook message categories",
+			ReadOnlyHint:    new(true),
+			DestructiveHint: new(false),
+			IdempotentHint:  new(true),
+			OpenWorldHint:   new(false),
+		}),
+	)
+	s.AddTool(listCategories, tools.HandleListCategories(manager, graph))
 
 	return s
 }
