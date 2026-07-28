@@ -1,9 +1,10 @@
 // server.go — MCP server bootstrap.
 //
-// Fase 1 registers exactly one tool (list_messages) as proof. The
-// remaining 10 read-only tools land in Stages 2-6 per the Fase 1
-// plan. Each registration is a single AddTool call wrapping a typed
-// handler in internal/tools/.
+// Fase 1 Stage 1: list_messages (proof).
+// Fase 1 Stage 2: get_message + search_messages.
+// Remaining tools land in Stages 3-6 per the Fase 1 plan in
+// /ARCHITECTURE.md. Each registration is a single AddTool call
+// wrapping a typed handler in internal/tools/.
 
 package server
 
@@ -31,7 +32,7 @@ func defaultHTTPClient() *http.Client {
 func New(manager *auth.Manager) *server.MCPServer {
 	s := server.NewMCPServer(
 		"outlook-mcp-suite/graph",
-		"0.1.0-stage1",
+		"0.1.0-stage2",
 		server.WithToolCapabilities(true),
 		server.WithLogging(),
 	)
@@ -41,11 +42,11 @@ func New(manager *auth.Manager) *server.MCPServer {
 	httpClient := defaultHTTPClient()
 	graph := mail.NewClient(httpClient)
 
-	// Tool: list_messages (Fase 1 Stage 1 proof)
+	// Tool: list_messages (Fase 1 Stage 1)
 	listMessages := mcp.NewTool("list_messages",
 		mcp.WithDescription("List messages in a Microsoft account folder via Microsoft Graph. "+
 			"Returns the first page of an OData envelope; NextLink is included for pagination. "+
-			"Fase 1: read-only, no body content (use get_message in a later stage)."),
+			"Fase 1: read-only, no body content (use get_message to fetch full body)."),
 		mcp.WithString("account",
 			mcp.Description("Account name from [accounts] in ~/.config/lzt-outlook/config.toml. "+
 				"Default-deny: must be in [accounts].allowed."),
@@ -78,8 +79,65 @@ func New(manager *auth.Manager) *server.MCPServer {
 			OpenWorldHint:   new(false),
 		}),
 	)
-
 	s.AddTool(listMessages, tools.HandleListMessages(manager, graph))
+
+	// Tool: get_message (Fase 1 Stage 2)
+	getMessage := mcp.NewTool("get_message",
+		mcp.WithDescription("Fetch a single message by Graph message ID. "+
+			"Returns the full resource including body (text or HTML). "+
+			"Use select to project only specific fields and reduce payload size."),
+		mcp.WithString("account",
+			mcp.Description("Account name from [accounts].allowed."),
+			mcp.Required(),
+		),
+		mcp.WithString("message_id",
+			mcp.Description("Graph message ID (returned by list_messages / search_messages)."),
+			mcp.Required(),
+		),
+		mcp.WithString("select",
+			mcp.Description("OData $select projection. Default includes bodyPreview but excludes body. "+
+				"Pass 'body' explicitly to fetch full HTML/text body. "+
+				"Example: 'id,subject,from,body'."),
+		),
+		mcp.WithToolAnnotation(mcp.ToolAnnotation{
+			Title:           "Get Outlook message by ID",
+			ReadOnlyHint:    new(true),
+			DestructiveHint: new(false),
+			IdempotentHint:  new(true),
+			OpenWorldHint:   new(false),
+		}),
+	)
+	s.AddTool(getMessage, tools.HandleGetMessage(manager, graph))
+
+	// Tool: search_messages (Fase 1 Stage 2)
+	searchMessages := mcp.NewTool("search_messages",
+		mcp.WithDescription("KQL-style search across message subject + body. "+
+			"Results ranked by Graph search relevance. Optionally scope to a folder."),
+		mcp.WithString("account",
+			mcp.Description("Account name from [accounts].allowed."),
+			mcp.Required(),
+		),
+		mcp.WithString("query",
+			mcp.Description("KQL search string. Examples: '\"quarterly report\"', "+
+				"'from:boss subject:urgent', 'hasAttachments:true'."),
+			mcp.Required(),
+		),
+		mcp.WithString("folder",
+			mcp.Description("Optional folder scope ('inbox', 'sentitems', etc.). Default: all folders."),
+		),
+		mcp.WithNumber("top",
+			mcp.Description("Maximum messages to return (1-1000). Default: 25."),
+			mcp.Min(1), mcp.Max(1000),
+		),
+		mcp.WithToolAnnotation(mcp.ToolAnnotation{
+			Title:           "Search Outlook messages (KQL)",
+			ReadOnlyHint:    new(true),
+			DestructiveHint: new(false),
+			IdempotentHint:  new(true),
+			OpenWorldHint:   new(false),
+		}),
+	)
+	s.AddTool(searchMessages, tools.HandleSearchMessages(manager, graph))
 
 	return s
 }

@@ -1,10 +1,10 @@
 // Package mail implements read-only access to Microsoft Graph mail
 // endpoints (/me/messages, /me/mailFolders, /me/messages/{id}/attachments).
 //
-// Fase 1 implements list_messages as proof. Other read-only tools
-// (get_message, search_messages, list_folders, list_attachments,
-// get_attachment, list_rules, list_categories) land in subsequent
-// stages per the Fase 1 plan in /ARCHITECTURE.md.
+// Fase 1 Stage 1: list_messages (paginated OData list).
+// Fase 1 Stage 2: get_message (single message + body), search_messages
+//                  (KQL body+subject search with relevance ranking).
+// Subsequent stages land in ../ARCHITECTURE.md §Fase 1 plan.
 package mail
 
 import (
@@ -49,19 +49,19 @@ type Message struct {
 	ID               string       `json:"id"`
 	ConversationID   string       `json:"conversationId,omitempty"`
 	Subject          string       `json:"subject,omitempty"`
-	Sender           *Recipient   `json:"sender,omitempty,omitzero"`
-	From             *Recipient   `json:"from,omitempty,omitzero"`
+	Sender           *Recipient   `json:"sender,omitzero"`
+	From             *Recipient   `json:"from,omitzero"`
 	ToRecipients     []*Recipient `json:"toRecipients,omitempty"`
-	ReceivedDateTime time.Time    `json:"receivedDateTime,omitempty,omitzero"`
-	IsRead           bool         `json:"isRead,omitempty,omitzero"`
-	HasAttachments   bool         `json:"hasAttachments,omitempty,omitzero"`
+	ReceivedDateTime time.Time    `json:"receivedDateTime,omitzero"`
+	IsRead           bool         `json:"isRead,omitzero"`
+	HasAttachments   bool         `json:"hasAttachments,omitzero"`
 	Importance       string       `json:"importance,omitempty"`
 	Preview          string       `json:"bodyPreview,omitempty"`
 }
 
 // Recipient is the minimal address shape Graph returns.
 type Recipient struct {
-	EmailAddress *EmailAddress `json:"emailAddress,omitempty,omitzero"`
+	EmailAddress *EmailAddress `json:"emailAddress,omitzero"`
 }
 
 // EmailAddress is the leaf address structure.
@@ -192,4 +192,67 @@ func truncate(s string, n int) string {
 		return s
 	}
 	return s[:n] + "…(truncated)"
+}
+
+// ItemBody represents the body of a message, event, or other item.
+// ContentType is "text" or "html" per Graph spec.
+type ItemBody struct {
+	ContentType string `json:"contentType,omitempty"`
+	Content     string `json:"content,omitempty"`
+}
+
+// MessageDetail is the extended message resource returned by
+// get_message. Embeds Message (so common fields stay accessible) and
+// adds the body + categories. Used by the get_message tool handler.
+type MessageDetail struct {
+	Message
+	Body       ItemBody `json:"body,omitzero"`
+	Categories []string `json:"categories,omitempty"`
+}
+
+// GetMessage fetches a single message by ID. If selectFields is non-empty,
+// it limits the returned projection via OData $select. bearer is the
+// OAuth access token injected by the caller.
+func (c *Client) GetMessage(ctx context.Context, bearer, messageID, selectFields string) (*MessageDetail, error) {
+	if bearer == "" {
+		return nil, errors.New("mail: empty bearer token")
+	}
+	if messageID == "" {
+		return nil, errors.New("mail: empty messageID")
+	}
+	endpoint := fmt.Sprintf("/me/messages/%s", url.PathEscape(messageID))
+	q := url.Values{}
+	if selectFields != "" {
+		q.Set("$select", selectFields)
+	}
+	full := c.BaseURL + endpoint
+	if len(q) > 0 {
+		full += "?" + q.Encode()
+	}
+
+	var out MessageDetail
+	if err := c.doGet(ctx, bearer, full, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// SearchMessages is a typed convenience over ListMessages with the
+// $search query parameter forced. It overrides OrderBy and Filter
+// because Graph's $search implicitly ranks by relevance — caller-
+// supplied $filter or $orderby would be ignored server-side.
+//
+// Graph's $search is KQL-style and requires ConsistencyLevel: eventual,
+// which ListMessages sets unconditionally (no cost when search is empty).
+func (c *Client) SearchMessages(ctx context.Context, bearer, query string, opts ListMessagesOptions) (*MessageList, error) {
+	if bearer == "" {
+		return nil, errors.New("mail: empty bearer token")
+	}
+	if query == "" {
+		return nil, errors.New("mail: empty search query")
+	}
+	opts.Search = query
+	opts.Filter = ""
+	opts.OrderBy = "receivedDateTime desc" // relevance implied by $search
+	return c.ListMessages(ctx, bearer, opts)
 }
