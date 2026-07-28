@@ -1,10 +1,11 @@
 // server.go — MCP server bootstrap.
 //
-// Fase 1 Stage 1: list_messages.
-// Fase 1 Stage 2: get_message + search_messages.
-// Fase 1 Stage 3: list_folders + get_folder + list_categories.
-// Fase 1 Stage 4: list_attachments + get_attachment + list_rules.
-// Remaining tools land in Stages 5-6 per the plan in ARCHITECTURE.md.
+// Stage 1: list_messages.
+// Stage 2: get_message + search_messages.
+// Stage 3: list_folders + get_folder + list_categories.
+// Stage 4: list_attachments + get_attachment + list_rules.
+// Stage 5: get_user_profile + get_mailbox_settings.
+// Stage 6 (final): smoke test + onboarding docs.
 
 package server
 
@@ -32,7 +33,7 @@ func defaultHTTPClient() *http.Client {
 func New(manager *auth.Manager) *server.MCPServer {
 	s := server.NewMCPServer(
 		"outlook-mcp-suite/graph",
-		"0.1.0-stage4",
+		"0.1.0-stage5",
 		server.WithToolCapabilities(true),
 		server.WithLogging(),
 	)
@@ -275,6 +276,46 @@ func New(manager *auth.Manager) *server.MCPServer {
 		}),
 	)
 	s.AddTool(listRules, tools.HandleListRules(manager, graph))
+
+	// Tool: get_user_profile (Stage 5)
+	getUserProfile := mcp.NewTool("get_user_profile",
+		mcp.WithDescription("Fetch the authenticated user's profile from /me: display name, UPN, primary mail, job title, phones, office location, preferred language."),
+		mcp.WithString("account",
+			mcp.Description("Account name from [accounts].allowed."),
+			mcp.Required(),
+		),
+		mcp.WithString("locale",
+			mcp.Description("Optional Accept-Language header (e.g. 'en-US', 'es-MX'). Empty = no header."),
+		),
+		mcp.WithToolAnnotation(mcp.ToolAnnotation{
+			Title:           "Get Outlook user profile",
+			ReadOnlyHint:    new(true),
+			DestructiveHint: new(false),
+			IdempotentHint:  new(true),
+			OpenWorldHint:   new(false),
+		}),
+	)
+	s.AddTool(getUserProfile, tools.HandleGetUserProfile(manager, graph))
+
+	// Tool: get_mailbox_settings (Stage 5)
+	getMailboxSettings := mcp.NewTool("get_mailbox_settings",
+		mcp.WithDescription("Fetch mailbox settings: out-of-office (automaticReplies), time zone, working hours, date/time format, language. Read-only."),
+		mcp.WithString("account",
+			mcp.Description("Account name from [accounts].allowed."),
+			mcp.Required(),
+		),
+		mcp.WithString("locale",
+			mcp.Description("Optional Accept-Language header. Empty = no header."),
+		),
+		mcp.WithToolAnnotation(mcp.ToolAnnotation{
+			Title:           "Get Outlook mailbox settings",
+			ReadOnlyHint:    new(true),
+			DestructiveHint: new(false),
+			IdempotentHint:  new(true),
+			OpenWorldHint:   new(false),
+		}),
+	)
+	s.AddTool(getMailboxSettings, tools.HandleGetMailboxSettings(manager, graph))
 
 	return s
 }

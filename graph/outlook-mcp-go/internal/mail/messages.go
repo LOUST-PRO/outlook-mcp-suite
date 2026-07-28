@@ -153,14 +153,24 @@ func (c *Client) ListMessages(ctx context.Context, bearer string, opts ListMessa
 }
 
 // doGet is the shared HTTP plumbing: build request, set auth header,
-// enforce MaxBodyBytes, decode JSON into out.
+// enforce MaxBodyBytes, decode JSON into out. It is the thin wrapper
+// around doGetWithLocale for requests that don't need a locale.
 func (c *Client) doGet(ctx context.Context, bearer, fullURL string, out any) error {
+	return c.doGetWithLocale(ctx, bearer, fullURL, "", out)
+}
+
+// doGetWithLocale is like doGet but allows an optional Accept-Language
+// header. Empty locale omits the header entirely.
+func (c *Client) doGetWithLocale(ctx context.Context, bearer, fullURL, locale string, out any) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, fullURL, nil)
 	if err != nil {
 		return fmt.Errorf("mail: build request: %w", err)
 	}
 	req.Header.Set("Authorization", "Bearer "+bearer)
 	req.Header.Set("Accept", "application/json")
+	if locale != "" {
+		req.Header.Set("Accept-Language", locale)
+	}
 	// ConsistencyLevel: Required for $search across multiple folders.
 	// Negligible cost when $search isn't used.
 	req.Header.Set("ConsistencyLevel", "eventual")
